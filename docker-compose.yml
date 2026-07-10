@@ -43,6 +43,18 @@ services:
     networks:
       - graphle-net
 
+  # 4. The Frontend (Nginx serving static files)
+  frontend:
+    image: nginx:alpine
+    ports:
+      - "5444:80"
+    volumes:
+      - ./frontend:/usr/share/nginx/html:ro
+    depends_on:
+      - api-gateway
+    networks:
+      - graphle-net
+
 # Define a private bridge network so the containers can talk to each other
 networks:
   graphle-net:
