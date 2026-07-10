@@ -1,0 +1,53 @@
+services:
+  # 1. The Database (PostgreSQL)
+  db:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_USER: graph_user
+      POSTGRES_PASSWORD: graph_password
+      POSTGRES_DB: graphle_db
+    ports:
+      - "5432:5432" # Exposes DB to your host machine so you can use DataGrip/pgAdmin
+    volumes:
+      # This is the magic line! It maps your local db-init folder to the container's initialization folder
+      - ./db-init:/docker-entrypoint-initdb.d
+      # Persists the database data even if the container is destroyed
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - graphle-net
+
+  # 2. The Math Engine (Python FastAPI - to be built in Step 3)
+  math-engine:
+    build:
+      context: ./math-engine
+      dockerfile: Dockerfile
+    ports:
+      - "5000:5000"
+    networks:
+      - graphle-net
+
+  # 3. The API Gateway (C# ASP.NET Core - to be built in Step 4)
+  api-gateway:
+    build:
+      context: ./api-gateway
+      dockerfile: Dockerfile
+    ports:
+      - "8080:8080"
+    environment:
+      # Passes the DB connection string and Math Engine URL into the C# app
+      - ConnectionStrings__DefaultConnection=Host=db;Database=graphle_db;Username=graph_user;Password=graph_password
+      - MathEngineUrl=http://math-engine:5000
+    depends_on:
+      - db
+      - math-engine
+    networks:
+      - graphle-net
+
+# Define a private bridge network so the containers can talk to each other
+networks:
+  graphle-net:
+    driver: bridge
+
+# Define a named volume for persistent database storage
+volumes:
+  postgres_data:

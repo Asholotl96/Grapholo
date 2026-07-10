@@ -1,0 +1,435 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Graphle</title>
+    <!-- Tailwind CSS for rapid UI styling later -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Math.js for parsing and evaluating equations -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/mathjs/11.8.0/math.js"></script>
+    <style>
+        /* Prevent scrollbars when canvas is full screen */
+        body,
+        html {
+            margin: 0;
+            padding: 0;
+            overflow: hidden;
+            background-color: #111827;
+            /* Tailwind gray-900 */
+        }
+    </style>
+</head>
+
+<body>
+
+    <!-- UI Overlay for User Input -->
+    <div class="absolute bottom-10 left-1/2 transform -translate-x-1/2 z-20 w-11/12 max-w-md flex flex-col gap-3">
+
+        <!-- Win Banner (Hidden by default, animated in via CSS) -->
+        <div id="win-banner"
+            class="hidden bg-gray-800 text-white p-5 rounded-xl shadow-2xl text-center border border-gray-700 transition-all transform duration-500 scale-95 opacity-0">
+            <h2 class="text-2xl font-bold text-emerald-400 mb-1" id="win-title">Validating...</h2>
+            <p id="win-subtitle" class="text-sm text-gray-300 mb-4">Checking your math with the server</p>
+            <button onclick="shareResult()" id="share-btn"
+                class="hidden bg-indigo-600 hover:bg-indigo-500 transition-colors text-white font-bold py-2 px-4 rounded-lg w-full flex justify-center items-center gap-2">
+                Share Result
+            </button>
+        </div>
+
+        <div class="bg-gray-800 p-4 rounded-xl shadow-2xl flex items-center gap-3 border border-gray-700">
+            <span class="text-white text-2xl font-mono italic">y =</span>
+            <!-- Input triggers a redraw every time a character is typed -->
+            <input type="text" id="equation-input" value="sin(x)"
+                class="w-full bg-gray-900 text-white px-4 py-2 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 font-mono text-lg disabled:opacity-50 disabled:cursor-not-allowed"
+                placeholder="e.g., x^2 - 4" autocomplete="off" />
+        </div>
+        <!-- Error message container (hidden by default) -->
+        <div id="error-message" class="text-red-400 text-sm mt-2 text-center font-semibold hidden">Invalid equation
+        </div>
+    </div>
+
+    <!-- The rendering layer -->
+    <canvas id="game-canvas" class="block w-full h-full absolute inset-0 z-10"></canvas>
+
+    <script>
+        // --- 1. Canvas Setup ---
+        const canvas = document.getElementById('game-canvas');
+        const ctx = canvas.getContext('2d');
+        const winBanner = document.getElementById('win-banner');
+
+        // --- 2. Game State & Config ---
+        // How many pixels represents 1 unit on the math graph. 
+        const SCALE = 50;
+        let gameWon = false;
+
+        // The Daily Puzzle: Now initialized as null, we fetch it from the database!
+        let dailyPuzzle = null;
+
+        // How close the line needs to be to the target to register a "hit" (in math units, not pixels)
+        const HIT_TOLERANCE = 0.3;
+
+        // Display/Logical sizing for crisp mobile rendering
+        let logicalWidth = window.innerWidth;
+        let logicalHeight = window.innerHeight;
+
+        // Gamification state
+        let progressHistory = [];
+        let maxHits = -1;
+
+        // --- 3. Core Coordinate Translation ---
+        /**
+         * Translates logical math coordinates to physical canvas pixel coordinates.
+         * Math: (0,0) is center, +y is up, +x is right.
+         * Canvas: (0,0) is top-left, +y is down, +x is right.
+         */
+        function mathToPixels(mathX, mathY) {
+            const pixelX = (logicalWidth / 2) + (mathX * SCALE);
+            const pixelY = (logicalHeight / 2) - (mathY * SCALE);
+            return { x: pixelX, y: pixelY };
+        }
+
+        // --- 4. Drawing the Grid ---
+        function drawGrid() {
+            // Clear the entire canvas on every redraw
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            // Calculate the visible math bounds based on current logical screen size
+            const minX = -logicalWidth / 2 / SCALE;
+            const maxX = logicalWidth / 2 / SCALE;
+            const minY = -logicalHeight / 2 / SCALE;
+            const maxY = logicalHeight / 2 / SCALE;
+
+            // Draw faint grid lines
+            ctx.lineWidth = 1;
+            ctx.strokeStyle = '#374151'; // Tailwind gray-700
+
+            ctx.beginPath();
+
+            // Vertical lines
+            for (let x = Math.floor(minX); x <= Math.ceil(maxX); x++) {
+                const start = mathToPixels(x, maxY);
+                const end = mathToPixels(x, minY);
+                ctx.moveTo(start.x, start.y);
+                ctx.lineTo(end.x, end.y);
+            }
+
+            // Horizontal lines
+            for (let y = Math.floor(minY); y <= Math.ceil(maxY); y++) {
+                const start = mathToPixels(minX, y);
+                const end = mathToPixels(maxX, y);
+                ctx.moveTo(start.x, start.y);
+                ctx.lineTo(end.x, end.y);
+            }
+            ctx.stroke();
+
+            // Draw bold X and Y axes
+            ctx.lineWidth = 2;
+            ctx.strokeStyle = '#9CA3AF'; // Tailwind gray-400
+
+            ctx.beginPath();
+            // X-axis (y = 0)
+            const xAxisStart = mathToPixels(minX, 0);
+            const xAxisEnd = mathToPixels(maxX, 0);
+            ctx.moveTo(xAxisStart.x, xAxisStart.y);
+            ctx.lineTo(xAxisEnd.x, xAxisEnd.y);
+
+            // Y-axis (x = 0)
+            const yAxisStart = mathToPixels(0, maxY);
+            const yAxisEnd = mathToPixels(0, minY);
+            ctx.moveTo(yAxisStart.x, yAxisStart.y);
+            ctx.lineTo(yAxisEnd.x, yAxisEnd.y);
+
+            ctx.stroke();
+        }
+
+        // --- 4.2 Drawing the Target Points ---
+        function drawTargets(hitTargets) {
+            if (!dailyPuzzle) return; // Don't try to draw targets before the API loads them
+
+            dailyPuzzle.points.forEach((point, index) => {
+                const screenPoint = mathToPixels(point.x, point.y);
+                const isHit = hitTargets && hitTargets.has(index);
+
+                ctx.beginPath();
+                // Draw a circle for the target
+                ctx.arc(screenPoint.x, screenPoint.y, 8, 0, 2 * Math.PI);
+
+                // If the target is hit, color it green, otherwise keep it red/orange
+                ctx.fillStyle = isHit ? '#10B981' : '#F59E0B'; // Tailwind emerald-500 or amber-500
+                ctx.fill();
+
+                // Add a border to the dot
+                ctx.lineWidth = 2;
+                ctx.strokeStyle = '#FFFFFF';
+                ctx.stroke();
+            });
+        }
+
+        // --- 4.5. Drawing the Math Curve & Collision Detection ---
+        function drawCurve() {
+            if (gameWon) return; // Stop evaluating equation if they already won
+
+            const equation = document.getElementById('equation-input').value;
+            const errorDiv = document.getElementById('error-message');
+
+            if (!equation) {
+                errorDiv.classList.add('hidden');
+                drawTargets(new Set()); // Draw un-hit targets
+                return;
+            }
+
+            try {
+                // Compile the string into an executable math object
+                const compiled = math.compile(equation);
+
+                // Setup drawing styles for the user's curve
+                ctx.lineWidth = 3;
+                ctx.strokeStyle = '#6366F1'; // Tailwind indigo-500
+                ctx.beginPath();
+
+                // Calculate screen bounds
+                const minX = -canvas.width / 2 / SCALE;
+                const maxX = canvas.width / 2 / SCALE;
+
+                // We use 500 segments to ensure the curve is smooth
+                const step = (maxX - minX) / 500;
+                let isFirstPoint = true;
+
+                // Track which targets are hit during this render cycle
+                let hitTargets = new Set();
+
+                // Loop from the left of the screen to the right
+                for (let x = minX; x <= maxX; x += step) {
+                    const y = compiled.evaluate({ x: x });
+
+                    // Skip drawing if the result is imaginary (e.g., sqrt(-1)) or undefined
+                    if (isNaN(y) || typeof y !== 'number') {
+                        isFirstPoint = true; // Break the continuous line
+                        continue;
+                    }
+
+                    // --- COLLISION DETECTION ---
+                    // Check distance from current curve point (x, y) to each target point
+                    if (dailyPuzzle) {
+                        dailyPuzzle.points.forEach((target, index) => {
+                            // Pythagorean theorem for distance
+                            const distance = Math.hypot(target.x - x, target.y - y);
+                            if (distance <= HIT_TOLERANCE) {
+                                hitTargets.add(index);
+                            }
+                        });
+                    }
+
+                    const screenPoint = mathToPixels(x, y);
+
+                    if (isFirstPoint) {
+                        ctx.moveTo(screenPoint.x, screenPoint.y);
+                        isFirstPoint = false;
+                    } else {
+                        ctx.lineTo(screenPoint.x, screenPoint.y);
+                    }
+                }
+                ctx.stroke();
+
+                // Draw the targets OVER the curve, passing in the ones we hit
+                drawTargets(hitTargets);
+
+                // Hide error message on successful draw
+                errorDiv.classList.add('hidden');
+
+                // --- WIN CONDITION ---
+                if (dailyPuzzle) {
+                    // Update gamification history if they hit a new high score of targets
+                    if (hitTargets.size > maxHits) {
+                        maxHits = hitTargets.size;
+                        let emojiRow = "";
+                        dailyPuzzle.points.forEach((_, i) => {
+                            emojiRow += hitTargets.has(i) ? "🟩" : "🟥";
+                        });
+                        progressHistory.push(emojiRow);
+                    }
+
+                    if (hitTargets.size === dailyPuzzle.points.length && !gameWon) {
+                        gameWon = true;
+                        winBanner.classList.remove('hidden');
+
+                        // Trigger CSS animation next frame
+                        setTimeout(() => {
+                            winBanner.classList.remove('scale-95', 'opacity-0');
+                            winBanner.classList.add('scale-100', 'opacity-100');
+                        }, 10);
+
+                        document.getElementById('equation-input').disabled = true; // Lock input on win
+
+                        // Send the winning equation to our C# API!
+                        submitWin(equation);
+                    }
+                }
+
+            } catch (err) {
+                // If the user types an incomplete function like "tan(", show error and skip drawing
+                errorDiv.classList.remove('hidden');
+                errorDiv.innerText = "Keep typing... (Invalid expression)";
+                drawTargets(new Set()); // Ensure targets still render when input is broken
+            }
+        }
+
+        // --- 5. Window Management & Game Loop ---
+        function redrawAll() {
+            if (!dailyPuzzle) return; // Wait until the API gives us the targets!
+
+            // Order matters! Background grid first, then the curve on top.
+            drawGrid();
+            drawCurve();
+
+            // If they already won (e.g. from a previous session), we just need to draw the targets
+            if (gameWon) {
+                let allHit = new Set(dailyPuzzle.points.map((_, i) => i));
+                drawTargets(allHit);
+            }
+        }
+
+        function resizeCanvas() {
+            logicalWidth = window.innerWidth;
+            logicalHeight = window.innerHeight;
+
+            // Handle Device Pixel Ratio for crisp rendering on high-res mobile displays
+            const dpr = window.devicePixelRatio || 1;
+            canvas.width = logicalWidth * dpr;
+            canvas.height = logicalHeight * dpr;
+            canvas.style.width = logicalWidth + 'px';
+            canvas.style.height = logicalHeight + 'px';
+
+            ctx.setTransform(1, 0, 0, 1, 0, 0); // Reset transform
+            ctx.scale(dpr, dpr); // Scale context to match physical pixel density
+
+            // Redraw everything after a resize
+            redrawAll();
+        }
+
+        // --- 6. API Integrations ---
+        async function fetchDailyPuzzle() {
+            try {
+                // Call the C# API Gateway
+                const response = await fetch('http://localhost:8080/api/puzzles/today');
+                const data = await response.json();
+
+                dailyPuzzle = data; // Assign the database puzzle to our game state
+
+                // --- NEW: THE LOCALSTORAGE LOCK ---
+                const lastPlayedId = localStorage.getItem('graphle_last_played_id');
+
+                if (lastPlayedId == dailyPuzzle.id) {
+                    // They already beat today's puzzle! Lock the game.
+                    gameWon = true;
+                    document.getElementById('equation-input').disabled = true;
+
+                    winBanner.classList.remove('hidden', 'scale-95', 'opacity-0');
+                    winBanner.classList.add('scale-100', 'opacity-100');
+                    document.getElementById('win-title').innerText = "Come back tomorrow!";
+                    document.getElementById('win-title').classList.add('text-emerald-400');
+                    document.getElementById('win-subtitle').innerText = "You already solved today's puzzle.";
+                    document.getElementById('share-btn').classList.remove('hidden');
+                }
+
+                redrawAll();        // Draw the newly loaded targets
+            } catch (error) {
+                console.error("Failed to load puzzle:", error);
+                document.getElementById('error-message').innerText = "Failed to connect to server.";
+                document.getElementById('error-message').classList.remove('hidden');
+            }
+        }
+
+        async function submitWin(winningEquation) {
+            try {
+                // Submit the win to the C# API
+                const response = await fetch('http://localhost:8080/api/submissions', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        puzzleId: dailyPuzzle.id,
+                        equation: winningEquation
+                    })
+                });
+
+                const result = await response.json();
+
+                if (result.isValid) {
+                    document.getElementById('win-title').innerText = "Puzzle Solved!";
+                    document.getElementById('win-subtitle').innerText = "Server verified your math.";
+                    document.getElementById('share-btn').classList.remove('hidden');
+
+                    // --- NEW: SAVE WIN TO LOCALSTORAGE ---
+                    localStorage.setItem('graphle_last_played_id', dailyPuzzle.id);
+                } else {
+                    document.getElementById('win-title').innerText = "Server Rejected";
+                    document.getElementById('win-title').classList.replace('text-emerald-400', 'text-red-400');
+                    document.getElementById('win-subtitle').innerText = result.message;
+                    document.getElementById('equation-input').disabled = false;
+                    gameWon = false;
+                }
+            } catch (error) {
+                console.error("Failed to submit win:", error);
+                document.getElementById('win-title').innerText = "Connection Error";
+                document.getElementById('win-title').classList.replace('text-emerald-400', 'text-red-400');
+                document.getElementById('win-subtitle').innerText = "Failed to reach server.";
+                document.getElementById('equation-input').disabled = false;
+                gameWon = false;
+            }
+        }
+
+        // --- 7. Gamification & Sharing ---
+        function shareResult() {
+            // Build the Wordle-style text based on their path to victory
+            let shareText = `Graphle #${dailyPuzzle.id}\n`;
+
+            // If they are retrieving from localstorage, they won't have history for this session, 
+            // so we just generate a generic win row if history is empty
+            if (progressHistory.length === 0) {
+                let emojiRow = "";
+                dailyPuzzle.points.forEach(() => emojiRow += "🟩");
+                shareText += emojiRow + '\n';
+            } else {
+                progressHistory.forEach(row => shareText += row + '\n');
+            }
+
+            shareText += `\nCan you graph it?`;
+
+            // Write to clipboard
+            const shareBtn = document.getElementById('share-btn');
+            try {
+                // Try modern clipboard API first
+                navigator.clipboard.writeText(shareText).then(() => {
+                    shareBtn.innerText = "Copied!";
+                    setTimeout(() => shareBtn.innerText = "Share Result", 2000);
+                });
+            } catch (err) {
+                // Fallback for older browsers
+                const textArea = document.createElement("textarea");
+                textArea.value = shareText;
+                document.body.appendChild(textArea);
+                textArea.select();
+                document.execCommand("copy");
+                textArea.remove();
+
+                shareBtn.innerText = "Copied!";
+                setTimeout(() => shareBtn.innerText = "Share Result", 2000);
+            }
+        }
+
+        // Attach event listener for window resizing
+        window.addEventListener('resize', resizeCanvas);
+
+        // Attach event listener for user input (triggers redraw as they type)
+        document.getElementById('equation-input').addEventListener('input', redrawAll);
+
+        // Initialize the canvas and fetch the puzzle!
+        resizeCanvas();
+        fetchDailyPuzzle();
+
+    </script>
+</body>
+
+</html>
