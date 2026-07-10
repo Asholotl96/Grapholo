@@ -41,7 +41,7 @@
         <div class="bg-gray-800 p-4 rounded-xl shadow-2xl flex items-center gap-3 border border-gray-700">
             <span class="text-white text-2xl font-mono italic">y =</span>
             <!-- Input triggers a redraw every time a character is typed -->
-            <input type="text" id="equation-input" value="sin(x)"
+            <input type="text" id="equation-input"
                 class="w-full bg-gray-900 text-white px-4 py-2 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 font-mono text-lg disabled:opacity-50 disabled:cursor-not-allowed"
                 placeholder="e.g., x^2 - 4" autocomplete="off" />
         </div>
@@ -76,7 +76,6 @@
 
         // Gamification state
         let progressHistory = [];
-        let maxHits = -1;
 
         // --- 3. Core Coordinate Translation ---
         /**
@@ -168,7 +167,7 @@
         }
 
         // --- 4.5. Drawing the Math Curve & Collision Detection ---
-        function drawCurve() {
+        function drawCurve(isSubmit = false) {
             if (gameWon) return; // Stop evaluating equation if they already won
 
             const equation = document.getElementById('equation-input').value;
@@ -239,17 +238,15 @@
                 // Hide error message on successful draw
                 errorDiv.classList.add('hidden');
 
-                // --- WIN CONDITION ---
-                if (dailyPuzzle) {
-                    // Update gamification history if they hit a new high score of targets
-                    if (hitTargets.size > maxHits) {
-                        maxHits = hitTargets.size;
-                        let emojiRow = "";
-                        dailyPuzzle.points.forEach((_, i) => {
-                            emojiRow += hitTargets.has(i) ? "🟩" : "🟥";
-                        });
-                        progressHistory.push(emojiRow);
-                    }
+                // --- WIN CONDITION & PROGRESS UPDATE (ONLY ON SUBMIT) ---
+                if (isSubmit && dailyPuzzle) {
+                    let emojiRow = "";
+                    dailyPuzzle.points.forEach((_, i) => {
+                        emojiRow += hitTargets.has(i) ? "🟩" : "🟥";
+                    });
+
+                    // Log the attempt since the user explicitly pressed Enter
+                    progressHistory.push(emojiRow);
 
                     if (hitTargets.size === dailyPuzzle.points.length && !gameWon) {
                         gameWon = true;
@@ -277,12 +274,12 @@
         }
 
         // --- 5. Window Management & Game Loop ---
-        function redrawAll() {
+        function redrawAll(isSubmit = false) {
             if (!dailyPuzzle) return; // Wait until the API gives us the targets!
 
             // Order matters! Background grid first, then the curve on top.
             drawGrid();
-            drawCurve();
+            drawCurve(isSubmit);
 
             // If they already won (e.g. from a previous session), we just need to draw the targets
             if (gameWon) {
@@ -305,8 +302,8 @@
             ctx.setTransform(1, 0, 0, 1, 0, 0); // Reset transform
             ctx.scale(dpr, dpr); // Scale context to match physical pixel density
 
-            // Redraw everything after a resize
-            redrawAll();
+            // Redraw everything after a resize (not a submit)
+            redrawAll(false);
         }
 
         // --- 6. API Integrations ---
@@ -334,7 +331,7 @@
                     document.getElementById('share-btn').classList.remove('hidden');
                 }
 
-                redrawAll();        // Draw the newly loaded targets
+                redrawAll(false);        // Draw the newly loaded targets
             } catch (error) {
                 console.error("Failed to load puzzle:", error);
                 document.getElementById('error-message').innerText = "Failed to connect to server.";
@@ -422,8 +419,15 @@
         // Attach event listener for window resizing
         window.addEventListener('resize', resizeCanvas);
 
-        // Attach event listener for user input (triggers redraw as they type)
-        document.getElementById('equation-input').addEventListener('input', redrawAll);
+        // Attach event listener for user input (triggers redraw as they type, but NO submit)
+        document.getElementById('equation-input').addEventListener('input', () => redrawAll(false));
+
+        // Attach event listener for 'Enter' key to trigger a formal submission
+        document.getElementById('equation-input').addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') {
+                redrawAll(true);
+            }
+        });
 
         // Initialize the canvas and fetch the puzzle!
         resizeCanvas();
