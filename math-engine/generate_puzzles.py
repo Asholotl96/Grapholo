@@ -39,7 +39,7 @@ def generate_and_insert_puzzle():
     try:
         conn = psycopg2.connect(
             host=os.getenv("DB_HOST", "db"),
-            database=os.getenv("POSTGRES_DB", "graphle_db"),
+            database=os.getenv("POSTGRES_DB", "grapholo_db"),
             user=os.getenv("POSTGRES_USER", "graph_user"),
             password=os.getenv("POSTGRES_PASSWORD", "graph_password")
         )
@@ -61,7 +61,7 @@ def generate_and_insert_puzzle():
         print(f"!! Failed to insert puzzle into database: {e}")
 
 def main():
-    print("Graphle Puzzle Generator Worker started!")
+    print("Grapholo Puzzle Generator Worker started!")
     
     # Run once immediately on startup just to ensure we have a puzzle ready
     generate_and_insert_puzzle()
