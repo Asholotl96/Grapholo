@@ -54,6 +54,20 @@ services:
       - api-gateway
     networks:
       - graphle-net
+  puzzle-generator:
+    build:
+      context: ./math-engine
+      dockerfile: Dockerfile
+    command: python generate_puzzles.py
+    environment:
+      - DB_HOST=db
+      - POSTGRES_DB=graphle_db
+      - POSTGRES_USER=graph_user
+      - POSTGRES_PASSWORD=graph_password
+    depends_on:
+      - db
+    networks:
+      - graphle-net
 
 # Define a private bridge network so the containers can talk to each other
 networks:

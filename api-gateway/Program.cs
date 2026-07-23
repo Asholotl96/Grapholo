@@ -39,7 +39,13 @@ app.MapGet("/api/puzzles/today", async (GraphleDbContext db) =>
     // Fetch the specific puzzle meant for today
     var puzzle = await db.Puzzles.FirstOrDefaultAsync(p => p.PuzzleDate == today);
     
-    if (puzzle == null) return Results.NotFound(new { message = "No puzzle generated for today." });
+    // Fallback for local development: if no puzzle for today exists, get the most recent one
+    if (puzzle == null)
+    {
+        puzzle = await db.Puzzles.OrderByDescending(p => p.PuzzleDate).FirstOrDefaultAsync();
+    }
+
+    if (puzzle == null) return Results.NotFound(new { message = "No puzzles found in the database." });
     
     // Convert the JSONB string from Postgres into a usable JSON object for the frontend
     var points = JsonSerializer.Deserialize<JsonElement>(puzzle.TargetPoints);

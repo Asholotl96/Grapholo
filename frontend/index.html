@@ -4,7 +4,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Graphle</title>
+    <title>Grapholo</title>
     <!-- Tailwind CSS for rapid UI styling later -->
     <script src="https://cdn.tailwindcss.com"></script>
     <!-- Math.js for parsing and evaluating equations -->
@@ -19,10 +19,66 @@
             background-color: #111827;
             /* Tailwind gray-900 */
         }
+
+        /* Container Vibration/Shake Animation for Failed Attempts */
+        @keyframes vibrate-shake {
+
+            0%,
+            100% {
+                transform: translateX(0) rotate(0deg);
+            }
+
+            15% {
+                transform: translateX(-6px) rotate(-3deg);
+            }
+
+            30% {
+                transform: translateX(6px) rotate(3deg);
+            }
+
+            45% {
+                transform: translateX(-5px) rotate(-2deg);
+            }
+
+            60% {
+                transform: translateX(5px) rotate(2deg);
+            }
+
+            75% {
+                transform: translateX(-2px) rotate(-1deg);
+            }
+        }
+
+        .vibrate-failed {
+            animation: vibrate-shake 0.45s cubic-bezier(.36, .07, .19, .97) both;
+            border-color: #EF4444 !important;
+            /* Flash red border on failed attempt */
+            box-shadow: 0 0 18px rgba(239, 68, 68, 0.6) !important;
+        }
     </style>
 </head>
 
 <body>
+
+    <!-- Top-Left Recenter Grid Button -->
+    <button onclick="resetView()" id="recenter-btn" title="Reset View (or double-click canvas)"
+        class="absolute top-6 left-6 z-20 bg-gray-800/90 backdrop-blur-md border border-gray-700 hover:bg-gray-700 text-gray-300 hover:text-white px-3.5 py-2.5 rounded-xl shadow-2xl flex items-center gap-2 font-sans text-xs font-semibold transition-all">
+        <svg class="w-4 h-4 text-indigo-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+        </svg>
+        Recenter Grid
+    </button>
+
+    <!-- Top-Right Attempt Counter Container -->
+    <div id="attempts-container"
+        class="absolute top-6 right-6 z-20 bg-gray-800/90 backdrop-blur-md border border-gray-700 text-white px-4 py-2.5 rounded-xl shadow-2xl flex items-center gap-3 font-mono text-sm transition-all duration-300">
+        <span class="text-gray-400 font-sans text-xs uppercase tracking-wider font-semibold">Attempts</span>
+        <span id="attempt-count"
+            class="bg-indigo-600 text-white font-bold px-2.5 py-0.5 rounded-lg text-base min-w-[28px] text-center shadow-inner">0</span>
+    </div>
 
     <!-- UI Overlay for User Input -->
     <div class="absolute bottom-10 left-1/2 transform -translate-x-1/2 z-20 w-11/12 max-w-md flex flex-col gap-3">
@@ -76,16 +132,52 @@
 
         // Gamification state
         let progressHistory = [];
+        let attemptCount = 0;
+
+        // Pan & Scroll offsets
+        let panX = 0;
+        let panY = 0;
+        let isDragging = false;
+        let dragStartX = 0;
+        let dragStartY = 0;
+
+        /**
+         * Updates attempt counter UI and triggers vibration animation for failed attempts.
+         * @param {boolean} isFailed - Whether the submission failed to solve the puzzle.
+         */
+        function triggerAttemptUpdate(isFailed) {
+            attemptCount++;
+            const countEl = document.getElementById('attempt-count');
+            const container = document.getElementById('attempts-container');
+
+            if (countEl) countEl.innerText = attemptCount;
+
+            if (isFailed && container) {
+                // Device haptic vibration (mobile / supporting devices)
+                if ('vibrate' in navigator) {
+                    try { navigator.vibrate(200); } catch (e) { }
+                }
+
+                // Visual CSS vibration on the top-right container
+                container.classList.remove('vibrate-failed');
+                void container.offsetWidth; // Force DOM reflow to restart animation
+                container.classList.add('vibrate-failed');
+
+                setTimeout(() => {
+                    container.classList.remove('vibrate-failed');
+                }, 450);
+            }
+        }
 
         // --- 3. Core Coordinate Translation ---
         /**
          * Translates logical math coordinates to physical canvas pixel coordinates.
-         * Math: (0,0) is center, +y is up, +x is right.
+         * Math: (0,0) is center + pan offset, +y is up, +x is right.
          * Canvas: (0,0) is top-left, +y is down, +x is right.
          */
         function mathToPixels(mathX, mathY) {
-            const pixelX = (logicalWidth / 2) + (mathX * SCALE);
-            const pixelY = (logicalHeight / 2) - (mathY * SCALE);
+            const pixelX = (logicalWidth / 2) + panX + (mathX * SCALE);
+            const pixelY = (logicalHeight / 2) + panY - (mathY * SCALE);
             return { x: pixelX, y: pixelY };
         }
 
@@ -94,11 +186,11 @@
             // Clear the entire canvas on every redraw
             ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-            // Calculate the visible math bounds based on current logical screen size
-            const minX = -logicalWidth / 2 / SCALE;
-            const maxX = logicalWidth / 2 / SCALE;
-            const minY = -logicalHeight / 2 / SCALE;
-            const maxY = logicalHeight / 2 / SCALE;
+            // Calculate the visible math bounds based on current logical screen size and pan offsets
+            const minX = (-logicalWidth / 2 - panX) / SCALE;
+            const maxX = (logicalWidth / 2 - panX) / SCALE;
+            const minY = (-logicalHeight / 2 + panY) / SCALE;
+            const maxY = (logicalHeight / 2 + panY) / SCALE;
 
             // Draw faint grid lines
             ctx.lineWidth = 1;
@@ -188,9 +280,9 @@
                 ctx.strokeStyle = '#6366F1'; // Tailwind indigo-500
                 ctx.beginPath();
 
-                // Calculate screen bounds
-                const minX = -canvas.width / 2 / SCALE;
-                const maxX = canvas.width / 2 / SCALE;
+                // Calculate screen bounds based on current pan offsets
+                const minX = (-logicalWidth / 2 - panX) / SCALE;
+                const maxX = (logicalWidth / 2 - panX) / SCALE;
 
                 // We use 500 segments to ensure the curve is smooth
                 const step = (maxX - minX) / 500;
@@ -250,6 +342,8 @@
 
                     if (hitTargets.size === dailyPuzzle.points.length && !gameWon) {
                         gameWon = true;
+                        triggerAttemptUpdate(false); // Successful attempt: count increases, NO vibration
+
                         winBanner.classList.remove('hidden');
 
                         // Trigger CSS animation next frame
@@ -262,6 +356,9 @@
 
                         // Send the winning equation to our C# API!
                         submitWin(equation);
+                    } else if (!gameWon) {
+                        // Failed attempt (missed target points): count increases AND container vibrates!
+                        triggerAttemptUpdate(true);
                     }
                 }
 
@@ -270,6 +367,11 @@
                 errorDiv.classList.remove('hidden');
                 errorDiv.innerText = "Keep typing... (Invalid expression)";
                 drawTargets(new Set()); // Ensure targets still render when input is broken
+
+                if (isSubmit && !gameWon) {
+                    // Enter pressed on invalid expression: failed attempt, vibrate container!
+                    triggerAttemptUpdate(true);
+                }
             }
         }
 
@@ -323,6 +425,14 @@
                     gameWon = true;
                     document.getElementById('equation-input').disabled = true;
 
+                    // Restore saved attempts if available
+                    const savedAttempts = localStorage.getItem('graphle_last_played_attempts');
+                    if (savedAttempts) {
+                        attemptCount = parseInt(savedAttempts, 10);
+                        const countEl = document.getElementById('attempt-count');
+                        if (countEl) countEl.innerText = attemptCount;
+                    }
+
                     winBanner.classList.remove('hidden', 'scale-95', 'opacity-0');
                     winBanner.classList.add('scale-100', 'opacity-100');
                     document.getElementById('win-title').innerText = "Come back tomorrow!";
@@ -358,14 +468,16 @@
                     document.getElementById('win-subtitle').innerText = "Server verified your math.";
                     document.getElementById('share-btn').classList.remove('hidden');
 
-                    // --- NEW: SAVE WIN TO LOCALSTORAGE ---
+                    // --- NEW: SAVE WIN AND ATTEMPTS TO LOCALSTORAGE ---
                     localStorage.setItem('graphle_last_played_id', dailyPuzzle.id);
+                    localStorage.setItem('graphle_last_played_attempts', attemptCount);
                 } else {
                     document.getElementById('win-title').innerText = "Server Rejected";
                     document.getElementById('win-title').classList.replace('text-emerald-400', 'text-red-400');
                     document.getElementById('win-subtitle').innerText = result.message;
                     document.getElementById('equation-input').disabled = false;
                     gameWon = false;
+                    triggerAttemptUpdate(true);
                 }
             } catch (error) {
                 console.error("Failed to submit win:", error);
@@ -380,7 +492,7 @@
         // --- 7. Gamification & Sharing ---
         function shareResult() {
             // Build the Wordle-style text based on their path to victory
-            let shareText = `Graphle #${dailyPuzzle.id}\n`;
+            let shareText = `Grapholo #${dailyPuzzle.id}\n`;
 
             // If they are retrieving from localstorage, they won't have history for this session, 
             // so we just generate a generic win row if history is empty
@@ -414,6 +526,78 @@
                 shareBtn.innerText = "Copied!";
                 setTimeout(() => shareBtn.innerText = "Share Result", 2000);
             }
+        }
+
+        // --- 8. Canvas Pan & Scroll Interactions ---
+        canvas.style.cursor = 'grab';
+
+        // Mouse Drag to Pan
+        canvas.addEventListener('mousedown', (e) => {
+            isDragging = true;
+            dragStartX = e.clientX;
+            dragStartY = e.clientY;
+            canvas.style.cursor = 'grabbing';
+        });
+
+        window.addEventListener('mousemove', (e) => {
+            if (!isDragging) return;
+            const dx = e.clientX - dragStartX;
+            const dy = e.clientY - dragStartY;
+            dragStartX = e.clientX;
+            dragStartY = e.clientY;
+
+            panX += dx;
+            panY += dy;
+            redrawAll(false);
+        });
+
+        window.addEventListener('mouseup', () => {
+            if (isDragging) {
+                isDragging = false;
+                canvas.style.cursor = 'grab';
+            }
+        });
+
+        // Touch Drag to Pan (Mobile/Tablet)
+        canvas.addEventListener('touchstart', (e) => {
+            if (e.touches.length === 1) {
+                isDragging = true;
+                dragStartX = e.touches[0].clientX;
+                dragStartY = e.touches[0].clientY;
+            }
+        }, { passive: true });
+
+        canvas.addEventListener('touchmove', (e) => {
+            if (!isDragging || e.touches.length !== 1) return;
+            const dx = e.touches[0].clientX - dragStartX;
+            const dy = e.touches[0].clientY - dragStartY;
+            dragStartX = e.touches[0].clientX;
+            dragStartY = e.touches[0].clientY;
+
+            panX += dx;
+            panY += dy;
+            redrawAll(false);
+        }, { passive: true });
+
+        canvas.addEventListener('touchend', () => {
+            isDragging = false;
+        });
+
+        // Scroll Wheel to Pan
+        canvas.addEventListener('wheel', (e) => {
+            e.preventDefault();
+            panX -= e.deltaX;
+            panY -= e.deltaY;
+            redrawAll(false);
+        }, { passive: false });
+
+        // Double-click canvas to reset view
+        canvas.addEventListener('dblclick', resetView);
+
+        function resetView() {
+            panX = 0;
+            panY = 0;
+            redrawAll(false);
         }
 
         // Attach event listener for window resizing
