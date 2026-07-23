@@ -19,6 +19,7 @@ WORKDIR /app
 # Expose port 8080 (which matches our docker-compose.yml)
 EXPOSE 8080
 ENV ASPNETCORE_URLS=http://+:8080
+ENV DOTNET_HOSTBUILDER__RELOADCONFIGONCHANGE=false
 
 # Copy the compiled output from the build stage
 COPY --from=build /app/publish .

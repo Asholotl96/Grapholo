@@ -1,8 +1,15 @@
 using System.ComponentModel.DataAnnotations.Schema;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
 
 var builder = WebApplication.CreateBuilder(args);
+
+// Disable file watchers for configuration files in container environments to avoid inotify limits
+foreach (var source in builder.Configuration.Sources.OfType<FileConfigurationSource>())
+{
+    source.ReloadOnChange = false;
+}
 
 // 1. Configure CORS to allow Vercel and any other frontend origin
 builder.Services.AddCors(options =>
