@@ -8,6 +8,8 @@
 
 **Wordle for math nerds.** Grapholo is a daily, browser-based puzzle game where players must find the correct mathematical equation (y = f(x)) to intersect a set of daily target coordinates. 
 
+NOW LIVE ON https://grapholo-one.vercel.app/
+
 Play the game, track your progress, and share your path to victory with Wordle-style emoji grids.
 
 ## Features
@@ -32,7 +34,7 @@ Grapholo is built using a modern, decoupled microservices architecture orchestra
 
 ---
 
-## Getting Started (Local Development)
+## Hosting Locally
 
 ### Prerequisites
 * [Docker](https://www.docker.com/products/docker-desktop) and Docker Compose installed on your machine.
