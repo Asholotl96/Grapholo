@@ -118,7 +118,7 @@
         // Automatically switch between local development and Render production API
         const API_BASE = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
             ? 'http://localhost:8080'
-            : 'https://grapholo-api-gateway.onrender.com'; // Replace with your actual Render API Gateway URL after deploying
+            : 'https://grapholo.onrender.com'; // Replace with your actual Render API Gateway URL after deploying
 
         // --- 2. Game State & Config ---
         // How many pixels represents 1 unit on the math graph. 
@@ -423,7 +423,7 @@
                 dailyPuzzle = data; // Assign the database puzzle to our game state
 
                 // --- NEW: THE LOCALSTORAGE LOCK ---
-                const lastPlayedId = localStorage.getItem('graphle_last_played_id');
+                const lastPlayedId = localStorage.getItem('grapholo_last_played_id');
 
                 if (lastPlayedId == dailyPuzzle.id) {
                     // They already beat today's puzzle! Lock the game.
@@ -431,7 +431,7 @@
                     document.getElementById('equation-input').disabled = true;
 
                     // Restore saved attempts if available
-                    const savedAttempts = localStorage.getItem('graphle_last_played_attempts');
+                    const savedAttempts = localStorage.getItem('grapholo_last_played_attempts');
                     if (savedAttempts) {
                         attemptCount = parseInt(savedAttempts, 10);
                         const countEl = document.getElementById('attempt-count');
@@ -474,8 +474,8 @@
                     document.getElementById('share-btn').classList.remove('hidden');
 
                     // --- NEW: SAVE WIN AND ATTEMPTS TO LOCALSTORAGE ---
-                    localStorage.setItem('graphle_last_played_id', dailyPuzzle.id);
-                    localStorage.setItem('graphle_last_played_attempts', attemptCount);
+                    localStorage.setItem('grapholo_last_played_id', dailyPuzzle.id);
+                    localStorage.setItem('grapholo_last_played_attempts', attemptCount);
                 } else {
                     document.getElementById('win-title').innerText = "Server Rejected";
                     document.getElementById('win-title').classList.replace('text-emerald-400', 'text-red-400');
