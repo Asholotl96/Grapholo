@@ -4,11 +4,13 @@ using Microsoft.EntityFrameworkCore;
 
 var builder = WebApplication.CreateBuilder(args);
 
-// 1. Configure CORS so our local HTML file can fetch data
+// 1. Configure CORS so our frontend can fetch data from any origin
 builder.Services.AddCors(options =>
 {
-    options.AddPolicy("AllowAll", policy =>
-        policy.AllowAnyOrigin().AllowAnyMethod().AllowAnyHeader());
+    options.AddDefaultPolicy(policy =>
+        policy.AllowAnyOrigin()
+              .AllowAnyMethod()
+              .AllowAnyHeader());
 });
 
 // 2. Configure Entity Framework Core with PostgreSQL
@@ -24,8 +26,31 @@ builder.Services.AddHttpClient("MathEngine", client =>
 
 var app = builder.Build();
 
-// Apply CORS policy
-app.UseCors("AllowAll");
+// Apply CORS policy globally to all endpoints and preflight requests
+app.UseCors();
+
+// Auto-create database tables and seed initial puzzle if DB is brand new
+try
+{
+    using var scope = app.Services.CreateScope();
+    var db = scope.ServiceProvider.GetRequiredService<GrapholoDbContext>();
+    db.Database.EnsureCreated();
+
+    if (!db.Puzzles.Any())
+    {
+        db.Puzzles.Add(new Puzzle
+        {
+            PuzzleDate = DateTime.UtcNow.Date,
+            TargetPoints = "[{\"x\": -3, \"y\": 0}, {\"x\": 0, \"y\": 3}, {\"x\": 3, \"y\": 0}]",
+            Hint = "Think symmetrical, but flatter."
+        });
+        db.SaveChanges();
+    }
+}
+catch (Exception ex)
+{
+    Console.WriteLine($"Database initialization notice: {ex.Message}");
+}
 
 
 // --- API Endpoints ---
