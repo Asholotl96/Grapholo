@@ -22,10 +22,34 @@ builder.Services.AddCors(options =>
     });
 });
 
-// 2. Configure Entity Framework Core with PostgreSQL
-var connString = builder.Configuration.GetConnectionString("DefaultConnection");
+// 2. Configure Entity Framework Core with PostgreSQL (supporting both URI and Key-Value formats)
+var rawConnString = builder.Configuration.GetConnectionString("DefaultConnection") ?? "";
+var connString = ParseNpgsqlConnectionString(rawConnString);
+
 builder.Services.AddDbContext<GrapholoDbContext>(options =>
     options.UseNpgsql(connString));
+
+// Helper to parse postgres:// or postgresql:// URI strings into Npgsql format
+static string ParseNpgsqlConnectionString(string rawConnString)
+{
+    if (string.IsNullOrWhiteSpace(rawConnString)) return rawConnString;
+
+    if (rawConnString.StartsWith("postgres://", StringComparison.OrdinalIgnoreCase) ||
+        rawConnString.StartsWith("postgresql://", StringComparison.OrdinalIgnoreCase))
+    {
+        var uri = new Uri(rawConnString);
+        var userInfo = uri.UserInfo.Split(':');
+        var username = userInfo.Length > 0 ? Uri.UnescapeDataString(userInfo[0]) : "";
+        var password = userInfo.Length > 1 ? Uri.UnescapeDataString(userInfo[1]) : "";
+        var database = uri.AbsolutePath.TrimStart('/');
+        var host = uri.Host;
+        var port = uri.Port > 0 ? uri.Port : 5432;
+
+        return $"Host={host};Port={port};Database={database};Username={username};Password={password};SSL Mode=Require;Trust Server Certificate=true";
+    }
+
+    return rawConnString;
+}
 
 // 3. Configure HTTP Client to talk to the Python Math Engine inside the Docker network
 builder.Services.AddHttpClient("MathEngine", client =>
