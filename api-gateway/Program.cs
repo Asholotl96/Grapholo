@@ -13,7 +13,7 @@ builder.Services.AddCors(options =>
 
 // 2. Configure Entity Framework Core with PostgreSQL
 var connString = builder.Configuration.GetConnectionString("DefaultConnection");
-builder.Services.AddDbContext<GraphleDbContext>(options =>
+builder.Services.AddDbContext<GrapholoDbContext>(options =>
     options.UseNpgsql(connString));
 
 // 3. Configure HTTP Client to talk to the Python Math Engine inside the Docker network
@@ -31,7 +31,7 @@ app.UseCors("AllowAll");
 // --- API Endpoints ---
 
 // Get today's puzzle
-app.MapGet("/api/puzzles/today", async (GraphleDbContext db) =>
+app.MapGet("/api/puzzles/today", async (GrapholoDbContext db) =>
 {
     // Get the current date (using UTC to avoid timezone edge cases)
     var today = DateTime.UtcNow.Date;
@@ -59,7 +59,7 @@ app.MapGet("/api/puzzles/today", async (GraphleDbContext db) =>
 });
 
 // Submit a winning equation
-app.MapPost("/api/submissions", async (SubmissionRequest req, GraphleDbContext db, IHttpClientFactory httpFactory) =>
+app.MapPost("/api/submissions", async (SubmissionRequest req, GrapholoDbContext db, IHttpClientFactory httpFactory) =>
 {
     // 1. Verify the puzzle exists in the DB
     var puzzle = await db.Puzzles.FindAsync(req.PuzzleId);
@@ -99,9 +99,9 @@ app.Run();
 
 // --- Database Models & Context ---
 
-public class GraphleDbContext : DbContext
+public class GrapholoDbContext : DbContext
 {
-    public GraphleDbContext(DbContextOptions<GraphleDbContext> options) : base(options) { }
+    public GrapholoDbContext(DbContextOptions<GrapholoDbContext> options) : base(options) { }
     public DbSet<Puzzle> Puzzles => Set<Puzzle>();
     public DbSet<Submission> Submissions => Set<Submission>();
 }

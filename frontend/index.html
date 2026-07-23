@@ -110,10 +110,15 @@
     <canvas id="game-canvas" class="block w-full h-full absolute inset-0 z-10"></canvas>
 
     <script>
-        // --- 1. Canvas Setup ---
+        // --- 1. Canvas Setup & API Configuration ---
         const canvas = document.getElementById('game-canvas');
         const ctx = canvas.getContext('2d');
         const winBanner = document.getElementById('win-banner');
+
+        // Automatically switch between local development and Render production API
+        const API_BASE = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
+            ? 'http://localhost:8080'
+            : 'https://grapholo-api-gateway.onrender.com'; // Replace with your actual Render API Gateway URL after deploying
 
         // --- 2. Game State & Config ---
         // How many pixels represents 1 unit on the math graph. 
@@ -412,7 +417,7 @@
         async function fetchDailyPuzzle() {
             try {
                 // Call the C# API Gateway
-                const response = await fetch('http://localhost:8080/api/puzzles/today');
+                const response = await fetch(`${API_BASE}/api/puzzles/today`);
                 const data = await response.json();
 
                 dailyPuzzle = data; // Assign the database puzzle to our game state
@@ -452,7 +457,7 @@
         async function submitWin(winningEquation) {
             try {
                 // Submit the win to the C# API
-                const response = await fetch('http://localhost:8080/api/submissions', {
+                const response = await fetch(`${API_BASE}/api/submissions`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
