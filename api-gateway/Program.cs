@@ -4,13 +4,15 @@ using Microsoft.EntityFrameworkCore;
 
 var builder = WebApplication.CreateBuilder(args);
 
-// 1. Configure CORS so our frontend can fetch data from any origin
+// 1. Configure CORS to allow Vercel and any other frontend origin
 builder.Services.AddCors(options =>
 {
-    options.AddDefaultPolicy(policy =>
-        policy.AllowAnyOrigin()
+    options.AddPolicy("AllowAll", policy =>
+    {
+        policy.SetIsOriginAllowed(_ => true)
               .AllowAnyMethod()
-              .AllowAnyHeader());
+              .AllowAnyHeader();
+    });
 });
 
 // 2. Configure Entity Framework Core with PostgreSQL
@@ -27,7 +29,7 @@ builder.Services.AddHttpClient("MathEngine", client =>
 var app = builder.Build();
 
 // Apply CORS policy globally to all endpoints and preflight requests
-app.UseCors();
+app.UseCors("AllowAll");
 
 // Auto-create database tables and seed initial puzzle if DB is brand new
 try
@@ -52,36 +54,46 @@ catch (Exception ex)
     Console.WriteLine($"Database initialization notice: {ex.Message}");
 }
 
+// Health check endpoint
+app.MapGet("/", () => Results.Ok(new { status = "Grapholo API Gateway Online" })).RequireCors("AllowAll");
 
 // --- API Endpoints ---
 
 // Get today's puzzle
 app.MapGet("/api/puzzles/today", async (GrapholoDbContext db) =>
 {
-    // Get the current date (using UTC to avoid timezone edge cases)
-    var today = DateTime.UtcNow.Date;
-
-    // Fetch the specific puzzle meant for today
-    var puzzle = await db.Puzzles.FirstOrDefaultAsync(p => p.PuzzleDate == today);
-    
-    // Fallback for local development: if no puzzle for today exists, get the most recent one
-    if (puzzle == null)
+    try
     {
-        puzzle = await db.Puzzles.OrderByDescending(p => p.PuzzleDate).FirstOrDefaultAsync();
-    }
+        // Get the current date (using UTC to avoid timezone edge cases)
+        var today = DateTime.UtcNow.Date;
 
-    if (puzzle == null) return Results.NotFound(new { message = "No puzzles found in the database." });
-    
-    // Convert the JSONB string from Postgres into a usable JSON object for the frontend
-    var points = JsonSerializer.Deserialize<JsonElement>(puzzle.TargetPoints);
-    
-    return Results.Ok(new { 
-        id = puzzle.Id, 
-        date = puzzle.PuzzleDate, 
-        points = points, 
-        hint = puzzle.Hint 
-    });
-});
+        // Fetch the specific puzzle meant for today
+        var puzzle = await db.Puzzles.FirstOrDefaultAsync(p => p.PuzzleDate == today);
+        
+        // Fallback for local development: if no puzzle for today exists, get the most recent one
+        if (puzzle == null)
+        {
+            puzzle = await db.Puzzles.OrderByDescending(p => p.PuzzleDate).FirstOrDefaultAsync();
+        }
+
+        if (puzzle == null) return Results.NotFound(new { message = "No puzzles found in the database." });
+        
+        // Convert the JSONB string from Postgres into a usable JSON object for the frontend
+        var points = JsonSerializer.Deserialize<JsonElement>(puzzle.TargetPoints);
+        
+        return Results.Ok(new { 
+            id = puzzle.Id, 
+            date = puzzle.PuzzleDate, 
+            points = points, 
+            hint = puzzle.Hint 
+        });
+    }
+    catch (Exception ex)
+    {
+        Console.WriteLine($"Error fetching puzzle: {ex.Message}");
+        return Results.Problem(detail: ex.Message, statusCode: 500);
+    }
+}).RequireCors("AllowAll");
 
 // Submit a winning equation
 app.MapPost("/api/submissions", async (SubmissionRequest req, GrapholoDbContext db, IHttpClientFactory httpFactory) =>
@@ -117,7 +129,7 @@ app.MapPost("/api/submissions", async (SubmissionRequest req, GrapholoDbContext 
 
     // 4. Return the Python engine's verdict back to the frontend
     return Results.Ok(validationResult);
-});
+}).RequireCors("AllowAll");
 
 app.Run();
 
