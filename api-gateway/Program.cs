@@ -52,9 +52,12 @@ static string ParseNpgsqlConnectionString(string rawConnString)
 }
 
 // 3. Configure HTTP Client to talk to the Python Math Engine inside the Docker network
+var rawMathUrl = builder.Configuration["MathEngineUrl"] ?? "http://math-engine:5000";
+var mathUrl = rawMathUrl.EndsWith("/") ? rawMathUrl : rawMathUrl + "/";
+
 builder.Services.AddHttpClient("MathEngine", client =>
 {
-    client.BaseAddress = new Uri(builder.Configuration["MathEngineUrl"] ?? "http://math-engine:5000");
+    client.BaseAddress = new Uri(mathUrl);
 });
 
 var app = builder.Build();
@@ -131,35 +134,45 @@ app.MapPost("/api/submissions", async (SubmissionRequest req, GrapholoDbContext 
 {
     // 1. Verify the puzzle exists in the DB
     var puzzle = await db.Puzzles.FindAsync(req.PuzzleId);
-    if (puzzle == null) return Results.BadRequest("Invalid puzzle ID");
+    if (puzzle == null) return Results.BadRequest(new { message = "Invalid puzzle ID" });
 
-    // 2. Ask the Python microservice if the equation actually hits the targets
-    var client = httpFactory.CreateClient("MathEngine");
-    var pythonPayload = new {
-        equation = req.Equation,
-        targets = JsonSerializer.Deserialize<JsonElement>(puzzle.TargetPoints)
-    };
+    try
+    {
+        // 2. Ask the Python microservice if the equation actually hits the targets
+        var client = httpFactory.CreateClient("MathEngine");
+        var pythonPayload = new {
+            equation = req.Equation,
+            targets = JsonSerializer.Deserialize<JsonElement>(puzzle.TargetPoints)
+        };
 
-    var response = await client.PostAsJsonAsync("/validate", pythonPayload);
-    
-    if (!response.IsSuccessStatusCode) {
-        return Results.BadRequest(new { message = "Invalid mathematical expression" });
+        var response = await client.PostAsJsonAsync("validate", pythonPayload);
+        
+        if (!response.IsSuccessStatusCode) {
+            var errorContent = await response.Content.ReadAsStringAsync();
+            Console.WriteLine($"MathEngine error ({response.StatusCode}): {errorContent}");
+            return Results.BadRequest(new { message = $"Math Engine error ({response.StatusCode}): {errorContent}" });
+        }
+
+        var validationResult = await response.Content.ReadFromJsonAsync<ValidationResult>();
+
+        // 3. Save the submission to the PostgreSQL database
+        var submission = new Submission {
+            PuzzleId = puzzle.Id,
+            EquationUsed = req.Equation,
+            IsSuccessful = validationResult?.IsValid ?? false
+        };
+        
+        db.Submissions.Add(submission);
+        await db.SaveChangesAsync();
+
+        // 4. Return the Python engine's verdict back to the frontend
+        return Results.Ok(validationResult);
     }
-
-    var validationResult = await response.Content.ReadFromJsonAsync<ValidationResult>();
-
-    // 3. Save the submission to the PostgreSQL database
-    var submission = new Submission {
-        PuzzleId = puzzle.Id,
-        EquationUsed = req.Equation,
-        IsSuccessful = validationResult?.IsValid ?? false
-    };
-    
-    db.Submissions.Add(submission);
-    await db.SaveChangesAsync();
-
-    // 4. Return the Python engine's verdict back to the frontend
-    return Results.Ok(validationResult);
+    catch (Exception ex)
+    {
+        Console.WriteLine($"Error communicating with MathEngine: {ex.Message}");
+        return Results.BadRequest(new { message = $"Connection to Math Engine failed: {ex.Message}" });
+    }
 }).RequireCors("AllowAll");
 
 app.Run();

@@ -38,9 +38,12 @@ def validate_equation(request: ValidationRequest):
         # convert_xor handles "^" -> "**"
         transformations = (standard_transformations + (implicit_multiplication_application, convert_xor))
         
+        # Pre-clean caret ^ to ** for reliable parsing
+        clean_equation = request.equation.replace('^', '**')
+
         # Parse the string into a secure mathematical expression
         x_sym = sympy.Symbol('x')
-        expr = parse_expr(request.equation, transformations=transformations, evaluate=False)
+        expr = parse_expr(clean_equation, transformations=transformations, evaluate=True)
 
         # Verify against each target point
         for target in request.targets:
@@ -55,5 +58,6 @@ def validate_equation(request: ValidationRequest):
         return {"isValid": True, "message": "All targets hit!"}
 
     except Exception as e:
-        # Catch invalid math syntax (e.g., mismatched parentheses or random text)
-        raise HTTPException(status_code=400, detail="Invalid mathematical expression")
+        # Catch invalid math syntax and report explicit detail
+        print(f"Validation error: {e}")
+        raise HTTPException(status_code=400, detail=f"Invalid expression: {str(e)}")
