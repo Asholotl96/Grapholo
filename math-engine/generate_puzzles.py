@@ -3,7 +3,6 @@ import random
 import time
 import os
 import psycopg2
-import schedule
 from datetime import date, timedelta
 
 # Types of math functions our generator can build
@@ -27,6 +26,7 @@ def generate_and_insert_puzzle():
     # Generate puzzle for TOMORROW
     puzzle_date = date.today() + timedelta(days=1)
     
+    print("Calculating math functions...")
     func_type = random.choice([generate_parabola, generate_line, generate_absolute])
     x_values = random.sample(range(-5, 6), 3)
     x_values.sort()
@@ -34,15 +34,21 @@ def generate_and_insert_puzzle():
     points = [{"x": x, "y": func_type(x)} for x in x_values]
     points_json = json.dumps(points)
 
-    # Connect to the PostgreSQL database (using Docker environment variables)
-    # We use default fallback values for local testing outside of Docker
+    # Connect to the PostgreSQL database
+    # We use DATABASE_URL if provided (e.g. GitHub Actions), else fallback to individual vars
     try:
-        conn = psycopg2.connect(
-            host=os.getenv("DB_HOST", "db"),
-            database=os.getenv("POSTGRES_DB", "grapholo_db"),
-            user=os.getenv("POSTGRES_USER", "graph_user"),
-            password=os.getenv("POSTGRES_PASSWORD", "graph_password")
-        )
+        print("Connecting to DB...")
+        db_url = os.getenv("DATABASE_URL")
+        if db_url:
+            conn = psycopg2.connect(db_url, connect_timeout=10000)
+        else:
+            conn = psycopg2.connect(
+                host=os.getenv("DB_HOST", "db"),
+                database=os.getenv("POSTGRES_DB", "grapholo_db"),
+                user=os.getenv("POSTGRES_USER", "graph_user"),
+                password=os.getenv("POSTGRES_PASSWORD", "graph_password"),
+                connect_timeout=10
+            )
         cur = conn.cursor()
         
         # Insert the puzzle, ignoring if it already exists for that date
@@ -61,18 +67,11 @@ def generate_and_insert_puzzle():
         print(f"!! Failed to insert puzzle into database: {e}")
 
 def main():
-    print("Grapholo Puzzle Generator Worker started!")
+    print("Grapholo Puzzle Generator script started!")
     
-    # Run once immediately on startup just to ensure we have a puzzle ready
     generate_and_insert_puzzle()
     
-    # Schedule the job to run every day at 11:59 PM
-    schedule.every().day.at("23:59").do(generate_and_insert_puzzle)
-
-    # Continuous loop that keeps the Docker container running
-    while True:
-        schedule.run_pending()
-        time.sleep(60) # Wake up every minute to check the time
+    print("Puzzle generation complete!")
 
 if __name__ == "__main__":
     main()
