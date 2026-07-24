@@ -51,13 +51,18 @@ def generate_and_insert_puzzle():
             )
         cur = conn.cursor()
         
-        # Insert the puzzle, ignoring if it already exists for that date
-        cur.execute("""
-            INSERT INTO puzzles (puzzle_date, target_points, hint) 
-            VALUES (%s, %s, %s) 
-            ON CONFLICT (puzzle_date) DO NOTHING;
-        """, (puzzle_date, points_json, "Generated automatically"))
-        
+        # Check if puzzle for this date already exists to avoid inserting duplicates
+        # We use a manual check instead of ON CONFLICT in case the remote DB lacks the UNIQUE constraint
+        cur.execute("SELECT 1 FROM puzzles WHERE puzzle_date = %s", (puzzle_date,))
+        if cur.fetchone():
+            print(f"!! Puzzle for {puzzle_date} already exists. Skipping insertion.")
+        else:
+            cur.execute("""
+                INSERT INTO puzzles (puzzle_date, target_points, hint) 
+                VALUES (%s, %s, %s) 
+            """, (puzzle_date, points_json, "Generated automatically"))
+            print(f"!! Successfully inserted puzzle for {puzzle_date}")
+            
         conn.commit()
         cur.close()
         conn.close()
